@@ -1,0 +1,19 @@
+{
+  "name": "my-wedding-gallery",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^7.0.4"
+  },
+  "dependencies": {
+    "@uppy/core": "^4.4.7",
+    "@uppy/dashboard": "^4.3.4",
+    "lightgallery": "^2.9.0-beta.1"
+  }
+}
