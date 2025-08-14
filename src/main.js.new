@@ -1,0 +1,257 @@
+import './style.css'
+
+import Uppy from '@uppy/core'
+import Dashboard from '@uppy/dashboard'
+import AwsS3 from '@uppy/aws-s3'
+import '@uppy/core/dist/style.min.css'
+import '@uppy/dashboard/dist/style.min.css'
+import lightGallery from 'lightgallery'
+import lgThumbnail from 'lightgallery/plugins/thumbnail'
+import 'lightgallery/css/lightgallery.css'
+import 'lightgallery/css/lg-thumbnail.css'
+
+// Wasabi config
+const wasabiConfig = {
+    bucket: import.meta.env.VITE_WASABI_BUCKET,
+    region: import.meta.env.VITE_WASABI_REGION
+};
+
+// Uppy setup
+const uppy = new Uppy({
+    restrictions: {
+        maxNumberOfFiles: 20,
+        allowedFileTypes: [
+            'image/jpeg',
+            'image/png',
+            'image/heic',
+            'image/heif'
+        ],
+        maxFileSize: 10 * 1024 * 1024 // 10MB max file size
+    },
+    autoProceed: false
+});
+
+// Configure dashboard
+uppy.use(Dashboard, {
+    trigger: '#camera-upload',
+    inline: false,
+    closeModalOnClickOutside: true,
+    showProgressDetails: true,
+    proudlyDisplayPoweredByUppy: false,
+    note: 'Share your photos (up to 10MB each)',
+    metaFields: [
+        { id: 'name', name: 'Your Name', placeholder: 'Optional: Add your name' }
+    ],
+    showRemoveButtonAfterComplete: true,
+    browserBackButtonClose: true
+});
+
+// Configure AWS S3 plugin for Wasabi
+uppy.use(AwsS3, {
+    companionUrl: null,
+    getUploadParameters: (file) => {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const uniqueFileName = `${timestamp}-${file.name}`;
+        const uploadUrl = `https://s3.${wasabiConfig.region}.wasabisys.com/${wasabiConfig.bucket}/${uniqueFileName}`;
+        
+        return Promise.resolve({
+            method: 'PUT',
+            url: uploadUrl,
+            fields: {},
+            headers: {
+                'Content-Type': file.type
+            }
+        });
+    }
+});
+
+// Handle file preview before upload
+uppy.on('file-added', (file) => {
+    const previewUrl = URL.createObjectURL(file.data);
+    showPreviewModal(previewUrl, file);
+});
+
+// Handle successful uploads
+uppy.on('upload-success', (file, response) => {
+    const uploadedUrl = `https://s3.${wasabiConfig.region}.wasabisys.com/${wasabiConfig.bucket}/${file.name}`;
+    addToGallery(uploadedUrl, false, file.meta);
+    console.log('Upload successful:', uploadedUrl);
+});
+
+// Handle upload errors
+uppy.on('upload-error', (file, error, response) => {
+    console.error('Upload failed:', error);
+    alert('Upload failed: ' + (error.message || 'Unknown error'));
+});
+
+// Handle upload completion
+uppy.on('complete', (result) => {
+    if (result.successful.length > 0) {
+        showThankYou();
+    }
+    uppy.reset();
+    const dashboard = uppy.getPlugin('Dashboard');
+    if (dashboard) dashboard.closeModal();
+});
+
+// Gallery setup
+const galleryContainer = document.getElementById('lightgallery');
+let galleryItems = [];
+
+function showPreviewModal(previewUrl, file) {
+    const modal = document.createElement('div');
+    modal.className = 'preview-modal';
+    modal.innerHTML = `
+        <div class="preview-content">
+            <img src="${previewUrl}" alt="Preview">
+            <div class="preview-controls">
+                <button class="confirm-upload">Yes, Include This</button>
+                <button class="cancel-upload">No, Skip This</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('.confirm-upload').onclick = () => {
+        modal.remove();
+        URL.revokeObjectURL(previewUrl);
+        const dashboard = uppy.getPlugin('Dashboard');
+        if (dashboard) dashboard.openModal();
+    };
+    
+    modal.querySelector('.cancel-upload').onclick = () => {
+        modal.remove();
+        URL.revokeObjectURL(previewUrl);
+        uppy.removeFile(file.id);
+        const dashboard = uppy.getPlugin('Dashboard');
+        if (dashboard) dashboard.openModal();
+    };
+}
+
+function addToGallery(url, isVideo, metadata = {}) {
+    galleryItems.push({
+        src: url,
+        thumb: url,
+        subHtml: `<div class="lightGallery-captions">
+            ${metadata.name ? `<p>Shared by: ${metadata.name}</p>` : ''}
+            <p>Uploaded: ${new Date().toLocaleDateString()}</p>
+        </div>`
+    });
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.className = 'gallery-item';
+    
+    const img = document.createElement('img');
+    img.src = url;
+    
+    a.appendChild(img);
+    galleryContainer.appendChild(a);
+    
+    if (window.gallery) {
+        window.gallery.refresh();
+    }
+}
+
+function showThankYou() {
+    const popup = document.createElement('div');
+    popup.className = 'thank-you-popup';
+    popup.textContent = 'Thank You!';
+    document.body.appendChild(popup);
+    setTimeout(() => {
+        popup.classList.add('fade-out');
+        setTimeout(() => popup.remove(), 2000);
+    }, 1200);
+}
+
+// Initialize gallery
+window.gallery = lightGallery(galleryContainer, {
+    plugins: [lgThumbnail],
+    speed: 500,
+    download: false,
+    thumbnail: true,
+    animateThumb: true,
+    showThumbByDefault: true,
+    thumbWidth: 100,
+    thumbHeight: '80px',
+    thumbMargin: 5,
+    mode: 'lg-fade',
+    backdropDuration: 400,
+    container: galleryContainer,
+    hash: false,
+    closable: true,
+    showMaximizeIcon: true,
+    appendSubHtmlTo: '.lg-item',
+    slideDelay: 400
+});
+
+// Styles
+const style = document.createElement('style');
+style.textContent = `
+    .preview-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+    }
+    .preview-content {
+        max-width: 90%;
+        max-height: 90vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+    }
+    .preview-content img {
+        max-width: 100%;
+        max-height: 70vh;
+        object-fit: contain;
+    }
+    .preview-controls {
+        display: flex;
+        gap: 10px;
+    }
+    .preview-controls button {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 1rem;
+    }
+    .confirm-upload {
+        background: #4CAF50;
+        color: white;
+    }
+    .cancel-upload {
+        background: #f44336;
+        color: white;
+    }
+    .thank-you-popup {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(76, 175, 80, 0.9);
+        color: white;
+        padding: 20px 40px;
+        border-radius: 10px;
+        font-size: 1.5rem;
+        z-index: 10001;
+    }
+    .thank-you-popup.fade-out {
+        opacity: 0;
+        transition: opacity 0.5s ease-out;
+    }
+`;
+document.head.appendChild(style);
